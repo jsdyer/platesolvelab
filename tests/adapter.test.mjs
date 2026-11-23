@@ -72,3 +72,50 @@ test('signed Access diagnostics distinguish binding and session problems without
  const response=await worker.fetch(new Request('https://api.example.com/api/job/1493115',{headers:{...fixture.headers,'Cf-Access-Jwt-Assertion':parts.join('.')}}),fixture.config);
  assert.equal(response.status,401);const message=await response.text();assert.match(message,/Invalid Access signature/);assert.ok(!message.includes('CF_ACCESS_AUD'));assert.equal(calls,0);
 });
+
+for(const operation of ['job read','file upload'])test(`authenticated dashboard bundle supports Workers fetch for ${operation}`,async t=>{
+ const {default:dashboard}=await import('../adapter/worker-dashboard.mjs');
+ const {readFile}=await import('node:fs/promises');const example=JSON.parse(await readFile(new URL('../web/data/example.json',import.meta.url)));
+ let providerCalls=0;
+ const fixture=await signedFixture(t,operation==='job read'?'dashboard-job-runtime':'dashboard-file-runtime',async(url,options)=>{
+  // workerd rejects this standard Fetch mode while Node accepts it. Enforce the
+  // actual Workers contract before the provider stub can receive the request.
+  if(options?.redirect==='error')throw new TypeError('Invalid redirect value, must be one of follow or manual.');
+  assert.equal(options.redirect,'manual');providerCalls++;
+  const path=new URL(url).pathname;
+  if(path.endsWith('/info/'))return Response.json({status:'success',calibration:example.calibration,original_filename:example.name,objects_in_field:example.objects});
+  if(path.endsWith('/calibration/'))return Response.json(example.calibration);
+  if(path==='/api/login')return Response.json({status:'success',session:'runtime-private-session'});
+  if(path==='/api/upload'){assert.ok(options.body.get('file') instanceof File);return Response.json({status:'success',subid:987});}
+  throw Error('Unexpected provider route');
+ });
+ let request;
+ if(operation==='job read')request=new Request('https://api.example.com/api/job/1493115',{headers:fixture.headers});
+ else{const form=new FormData();form.append('file',new File(['synthetic sky image'], 'sky.jpg',{type:'image/jpeg'}));form.append('consent','yes');request=new Request('https://api.example.com/api/solve',{method:'POST',headers:fixture.headers,body:form});}
+ const response=await dashboard.fetch(request,fixture.config);assert.equal(response.status,200,await response.clone().text());
+ const data=await response.json();assert.equal(operation==='job read'?data.jobId:data.subid,operation==='job read'?'1493115':'987');assert.equal(providerCalls,2);
+});
+
+test('dashboard refuses provider redirects without forwarding secrets or following Location',async t=>{
+ const {default:dashboard}=await import('../adapter/worker-dashboard.mjs');let calls=[];
+ const fixture=await signedFixture(t,'dashboard-redirect-runtime',async(url,options)=>{
+  assert.equal(options.redirect,'manual');calls.push(new URL(url).pathname);
+  return new Response(null,{status:302,headers:{Location:'https://untrusted.example/?token=private-response-value'}});
+ });
+ const response=await dashboard.fetch(new Request('https://api.example.com/api/job/1493115',{headers:fixture.headers}),fixture.config);
+ const body=await response.text();assert.equal(response.status,502);assert.match(body,/Astrometry job lookup returned a redirect/);assert.ok(!body.includes('private-response-value'));assert.ok(!body.includes('untrusted.example'));
+ assert.deepEqual(calls.sort(),['/api/jobs/1493115/calibration/','/api/jobs/1493115/info/']);
+});
+
+test('dashboard classifies sign-in network failure and upload timeout without echoing exceptions',async t=>{
+ const {default:dashboard}=await import('../adapter/worker-dashboard.mjs');let mode='login-failure';
+ const fixture=await signedFixture(t,'dashboard-network-runtime',async(url,options)=>{
+  assert.equal(options.redirect,'manual');
+  if(mode==='login-failure')throw new TypeError('private-key-and-session-in-exception');
+  if(new URL(url).pathname==='/api/login')return Response.json({status:'success',session:'private-provider-session'});
+  throw new DOMException('private-upload-details','TimeoutError');
+ });
+ const request=()=>{const form=new FormData();form.set('url','https://images.example.org/sky.jpg');form.set('consent','yes');return new Request('https://api.example.com/api/solve',{method:'POST',headers:fixture.headers,body:form});};
+ let response=await dashboard.fetch(request(),fixture.config);let body=await response.text();assert.equal(response.status,502);assert.match(body,/Astrometry sign-in could not connect/);assert.ok(!body.includes('private-key'));
+ mode='upload-timeout';response=await dashboard.fetch(request(),fixture.config);body=await response.text();assert.equal(response.status,504);assert.match(body,/Astrometry image submission timed out/);assert.match(body,/before uploading the image again/);assert.ok(!body.includes('private-upload'));assert.ok(!body.includes('private-provider-session'));
+});

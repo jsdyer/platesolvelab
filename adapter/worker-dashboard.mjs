@@ -57,7 +57,27 @@ export async function authenticate(request,env){
  if(typeof claims.email!=='string')throw fail('Access identity has no email. Use the owner email sign-in policy.',403);
  if(claims.email.toLowerCase()!==env.OWNER_EMAIL.toLowerCase())throw fail('Owner email mismatch. Sign in with the identity configured in OWNER_EMAIL.',403);
 }
-async function provider(path,payload,multipart){const options={signal:AbortSignal.timeout(40000),redirect:'error'};if(payload){options.method='POST';options.body=multipart?payload:new URLSearchParams({'request-json':JSON.stringify(payload)});}const r=await fetch(BASE+path,options);if(!r.ok)throw fail(`Astrometry returned HTTP ${r.status}.`,502);const text=await boundedText(r);let data;try{data=JSON.parse(text);}catch{throw fail('Astrometry returned an unexpected response.',502);}if(data.status==='error')throw fail('Astrometry rejected the request. Check the configured account and image options.',502);return data;}
+async function provider(path,payload,multipart){
+ const operation=path==='/api/login'?'Astrometry sign-in':/^\/api\/(?:upload|url_upload)$/.test(path)?'Astrometry image submission':path.startsWith('/api/submissions/')?'Astrometry submission lookup':'Astrometry job lookup';
+ // Workers supports follow/manual only. Refuse redirects ourselves so a key,
+ // session or uploaded image can never be forwarded to another destination.
+ const options={signal:AbortSignal.timeout(40000),redirect:'manual'};
+ if(payload){options.method='POST';options.body=multipart?payload:new URLSearchParams({'request-json':JSON.stringify(payload)});}
+ let r;
+ try{r=await fetch(BASE+path,options);}catch(error){
+  const timedOut=error?.name==='TimeoutError'||error?.name==='AbortError';
+  const retry=operation==='Astrometry image submission'?' Check your Astrometry account before uploading the image again.':' Try again later.';
+  throw fail(`${operation} ${timedOut?'timed out':'could not connect to the provider'}.${retry}`,timedOut?504:502);
+ }
+ if(r.status>=300&&r.status<400)throw fail(`${operation} returned a redirect. This service will not follow it.`,502);
+ if(!r.ok)throw fail(`${operation} returned HTTP ${r.status}.`,502);
+ let text;
+ try{text=await boundedText(r);}catch(error){if(error?.status)throw error;throw fail(`${operation} response could not be read.`,502);}
+ let data;try{data=JSON.parse(text);}catch{throw fail(`${operation} returned an unexpected response.`,502);}
+ if(!data||typeof data!=='object'||Array.isArray(data))throw fail(`${operation} returned invalid metadata.`,502);
+ if(data.status==='error')throw fail(`${operation} was rejected. Check the configured account and image options.`,502);
+ return data;
+}
 async function result(id){const [info,cal]=await Promise.all([provider(`/api/jobs/${id}/info/`),provider(`/api/jobs/${id}/calibration/`)]);return fromProvider(id,info,cal);}
 async function limitedForm(request){const max=11*1024*1024;if(Number(request.headers.get('content-length'))>max)throw fail('Maximum image size is 10 MB.',413);const reader=request.body?.getReader();if(!reader)throw fail('No upload body.');let size=0;const chunks=[];for(;;){const {done,value}=await reader.read();if(done)break;size+=value.byteLength;if(size>max){await reader.cancel();throw fail('Maximum image size is 10 MB.',413);}chunks.push(value);}return new Response(new Blob(chunks),{headers:{'Content-Type':request.headers.get('Content-Type')||''}}).formData();}
 export default {async fetch(request,env){

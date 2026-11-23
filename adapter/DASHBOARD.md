@@ -4,6 +4,8 @@ The quickest first test uses the Worker's own **workers.dev** address. You do no
 
 The Worker includes a sign-in-protected upload page. Open that page directly, submit a photo, download its receipt, and import it into [Plate Solve Lab](https://coolcode.ca/platesolvelab/). The public viewer remains available to everyone; your upload service is owner-only.
 
+GitHub Pages publishes the viewer's HTML, CSS and JavaScript. The browser runs its receipt display and comparison code, but Pages cannot run a private API handler or keep an API key secret from visitors. The Cloudflare Worker supplies that server-side handler: after your Access sign-in, it uses the stored Astrometry key to submit a photo and retrieve the result. Astrometry.net performs the plate solving. The Worker is an additional part of the tool, not a replacement for its GitHub Pages website.
+
 ## 1. Create the dedicated Worker
 
 Open **Cloudflare dashboard → Workers & Pages → Create application → Create Worker** (a Hello World starter is sufficient). Name it **`platesolvelab-owner`**, then select **Deploy**. Open **Edit code**.
@@ -75,11 +77,15 @@ Worker-level Access still uses an Access application audience. There is no separ
 
 Replace **`ASTROMETRY_API_KEY`** with a binding of type **Secret**, using the same name. If the editor cannot change the binding's type, remove the Text entry and add it again as **Secret**, then **Deploy**. The Worker receives both binding types through `env`, so storing it as Text does not explain the Access-identity error; the difference is that a Secret's saved value is hidden from the Dashboard and Wrangler.
 
-If a real API key was shared in chat, a screenshot or source code, replace it through the provider's account controls and save the replacement in both the Worker Secret and GitHub Actions secret. Do not paste the replacement into a message or the source editor.
+Use your existing Astrometry key for the **Secret** binding. Astrometry's published API documentation does not describe a self-service key-reset operation, and its published profile-editing code excludes the API key from editable fields. Do not assume there is a regeneration button or that you must create a new account. If a key replacement is needed, ask the Astrometry maintainers through the [official support forum](https://groups.google.com/g/astrometry) how they can reset your account's key; never post the key there. If they issue a replacement, update both the Worker Secret and GitHub Actions secret.
 
 ### The editor warns about file types or an upload fails validation
 
 Replace the entire editor contents with the latest [worker-dashboard.mjs](worker-dashboard.mjs) and **Deploy**. The generated bundle includes the current upload type checks and all required modules; do not patch isolated lines from older versions into it. Editor file/type warnings and upload validation are separate from an Access-audience mismatch. First confirm the production page opens and **Read existing job** works, then test a photo upload.
+
+### Sign-in works, but both reading a job and uploading return a generic error
+
+Deploy the latest complete [worker-dashboard.mjs](worker-dashboard.mjs), then reopen the production **Visit** URL and retry **Read existing job** with `1493115`. An earlier adapter used `redirect: "error"` for provider requests. Cloudflare Workers does not support that option and throws before sending a request; the updated adapter uses `manual` and rejects redirect responses explicitly. This runtime error does not mean your Astrometry key is wrong, and reading an existing public job does not use that key. If reading works but an upload fails, retain the displayed error or submission ID to distinguish a provider rejection from a still-pending solve.
 
 ## Optional: a custom API hostname later
 
@@ -108,3 +114,7 @@ Edit `adapter/worker.mjs`, `adapter/owner-page.mjs` or `web/model.mjs`, then reg
 - [Exact-email policy selectors](https://developers.cloudflare.com/cloudflare-one/access-controls/policies/#cloudflare-access-selectors)
 - [Manage and attach Access policies](https://developers.cloudflare.com/cloudflare-one/access-controls/policies/policy-management/)
 - [Partial DNS setup availability](https://developers.cloudflare.com/dns/zone-setups/partial-setup/)
+- [GitHub Pages serves static site files](https://docs.github.com/en/pages/getting-started-with-github-pages/what-is-github-pages)
+- [Workers supported request redirect modes](https://developers.cloudflare.com/workers/runtime-apis/request/#parameters)
+- [Astrometry API documentation](https://astrometry.net/doc/net/api.html)
+- [Astrometry profile-editing source](https://github.com/dstndstn/astrometry.net/blob/main/net/views/user.py)
