@@ -1,37 +1,20 @@
-import { cleanLines } from './model.mjs';
-const input = document.querySelector('#input');
-const output = document.querySelector('#output');
-const status = document.querySelector('#status');
-const copy = document.querySelector('#copy');
-function update() {
-  const result = cleanLines(input.value);
-  output.value = result.text;
-  status.textContent = `${result.count} unique ${result.count === 1 ? 'line' : 'lines'}; ${result.removed} ${result.removed === 1 ? 'duplicate' : 'duplicates'} removed.`;
-  copy.disabled = result.count === 0;
-}
-input.addEventListener('input', update);
-document.querySelector('#sample').addEventListener('click', () => {
-  input.value = '  Halifax\nLangley\nHalifax\n\nVancouver  ';
-  update();
-});
-document.querySelector('#clear').addEventListener('click', () => {
-  input.value = '';
-  update();
-  input.focus();
-});
-if (navigator.clipboard && window.isSecureContext) {
-  copy.hidden = false;
-  copy.disabled = true;
-  copy.addEventListener('click', async () => {
-    try {
-      await navigator.clipboard.writeText(output.value);
-      status.textContent = 'Result copied.';
-    } catch {
-      output.focus();
-      output.select();
-      status.textContent = 'Copy was unavailable. The result is selected so you can copy it manually.';
-    }
-  });
-}
-// Namespace future preference storage as coolcode:<tool-id>:<key>.
-// Do not persist pasted text or uploads by default.
+import {receipt,jobId,fromProvider,compare,raHours,publicImageUrl,PROVIDER} from './model.mjs';
+const $=id=>document.getElementById(id);const records=[];let config={},busy=false;const status=message=>{$('status').textContent=message;};
+function node(tag,text,className){const el=document.createElement(tag);el.textContent=text;if(className)el.className=className;return el;}
+function metric(parent,label,value,detail=''){const d=node('dl','','metric');d.append(node('dt',label),node('dd',value));if(detail)d.append(node('small',detail));parent.append(d);}
+function link(parent,label,url){const a=node('a',label);a.href=url;a.target='_blank';a.rel='noopener noreferrer';parent.append(a);}
+function add(raw){const r=receipt(raw),key=`${r.jobId}/${r.capturedAt}`;let i=records.findIndex(x=>`${x.jobId}/${x.capturedAt}`===key);if(i<0){records.push(r);i=records.length-1;}refresh(i);}
+function refresh(selected=Number($('selected').value)||0){$('selected').replaceChildren();records.forEach((r,i)=>{const o=node('option',`${r.name} · job ${r.jobId} · ${r.capturedAt.slice(0,10)}`);o.value=i;$('selected').append(o);});$('selected').value=String(selected);render();}
+function render(){if(!records.length)return;const index=Number($('selected').value),r=records[index],c=r.calibration;$('results').hidden=false;$('receipt-name').textContent=r.name;$('receipt-date').textContent=`Job ${r.jobId} · metadata captured ${new Date(r.capturedAt).toLocaleString(undefined,{timeZone:'UTC',timeZoneName:'short'})}`;$('metrics').replaceChildren();metric($('metrics'),'RIGHT ASCENSION',raHours(c.ra),`${c.ra.toFixed(6)}°`);metric($('metrics'),'DECLINATION',`${c.dec>=0?'+':''}${c.dec.toFixed(5)}°`);metric($('metrics'),'FIELD OF VIEW',c.width_arcsec!=null&&c.height_arcsec!=null?`${(c.width_arcsec/3600).toFixed(3)}° × ${(c.height_arcsec/3600).toFixed(3)}°`:'Not reported',`Field radius ${c.radius.toFixed(3)}°`);metric($('metrics'),'PIXEL SCALE',`${c.pixscale.toFixed(3)}″ / px`,`Provider parity ${c.parity}`);$('field-box').style.transform=`rotate(${c.orientation}deg)`;$('orientation-caption').textContent=`Provider orientation ${c.orientation.toFixed(2)}°`;$('objects').replaceChildren();if(r.objects.length)for(const name of r.objects)$('objects').append(node('span',name,'tag'));else $('objects').append(node('p','No objects reported in this calibration.'));$('receipt-note').textContent=r.note||'This receipt contains provider metadata only. A successful solve does not guarantee that every annotation is correct.';$('links').replaceChildren();link($('links'),'Provider JSON ↗',`${PROVIDER}/api/jobs/${r.jobId}/info/`);link($('links'),'Annotated image ↗',`${PROVIDER}/annotated_display/${r.jobId}`);link($('links'),'Download WCS ↗',`${PROVIDER}/wcs_file/${r.jobId}`);link($('links'),'Calibrated FITS ↗',`${PROVIDER}/new_fits_file/${r.jobId}`);$('compare').replaceChildren(node('option',records.length>1?'Choose a second receipt':'Import another receipt to compare'));$('compare').firstChild.value='';records.forEach((other,i)=>{if(i===index)return;const o=node('option',`${other.name} · job ${other.jobId}`);o.value=i;$('compare').append(o);});$('comparison').replaceChildren();}
+async function json(url,options={}){const response=await fetch(url,{...options,signal:AbortSignal.timeout(45000)});if(!response.ok){let error;try{error=(await response.json()).error;}catch{}throw Error(typeof error==='string'?error:`Service returned HTTP ${response.status}. Previous receipts are unchanged.`);}const text=await response.text();if(text.length>2_000_000)throw Error('Response is too large.');try{return JSON.parse(text);}catch{throw Error('The service returned a sign-in page or non-JSON response. Open owner sign-in, then retry.');}}
+async function action(fn){if(busy)return;busy=true;for(const b of document.querySelectorAll('button'))b.disabled=true;try{await fn();}catch(e){status(e.message||'Request failed. Previous receipts are unchanged.');}finally{busy=false;for(const b of document.querySelectorAll('button'))b.disabled=false;}}
+function adapter(path){return `${config.adapterUrl.replace(/\/$/,'')}${path}`;}
+$('example').addEventListener('click',()=>action(async()=>{add(await json(config.example||'./data/example.json'));status('Opened a genuine, dated public solve from the Astrometry API documentation. No image has been submitted.');}));
+$('inspect-form').addEventListener('submit',e=>{e.preventDefault();action(async()=>{const id=jobId($('job').value);$('job-help').hidden=true;if(config.adapterUrl){status('Retrieving the provider’s existing calibration…');add(await json(adapter(`/api/job/${id}`),{credentials:'include'}));status('Existing job retrieved. No photo was submitted.');}else{$('requested-job').textContent=`Job ID: ${id}`;$('raw-link').href=`${PROVIDER}/api/jobs/${id}/info/`;$('job-workflow').href=config.ownerWorkflow;$('job-help').hidden=false;status('Job validated. Use the workflow below to retrieve its receipt, then import it here.');}});});
+$('import').addEventListener('change',()=>action(async()=>{const imported=[];for(const file of $('import').files){if(file.size>2_000_000)throw Error('Receipt files must be under 2 MB.');let data;try{data=JSON.parse(await file.text());}catch{throw Error('The selected file is not valid JSON.');}const list=Array.isArray(data)?data:[data];if(list.length>100)throw Error('Import at most 100 receipts at once.');for(const raw of list)imported.push(receipt(raw));}if(records.length+imported.length>300)throw Error('Keep at most 300 receipts in a tab.');for(const r of imported)add(r);status(`Imported ${imported.length} receipt${imported.length===1?'':'s'}. Files stayed on this device.`);$('import').value='';}));
+$('selected').addEventListener('change',render);$('compare').addEventListener('change',()=>{$('comparison').replaceChildren();if($('compare').value==='')return;const result=compare(records[Number($('selected').value)],records[Number($('compare').value)]);metric($('comparison'),'CENTRE SEPARATION',`${result.separation.toFixed(4)}°`);metric($('comparison'),'ORIENTATION CHANGE',`${result.rotation.toFixed(2)}°`);metric($('comparison'),'PIXEL SCALE CHANGE',`${result.scaleChange>=0?'+':''}${result.scaleChange.toFixed(2)}%`);});
+$('save').addEventListener('click',()=>{const blob=new Blob([JSON.stringify(records,null,2)+'\n'],{type:'application/json'});const url=URL.createObjectURL(blob);const a=node('a','');a.href=url;a.download=`plate-solve-receipts-${new Date().toISOString().slice(0,10)}.json`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);status('Saved receipt metadata. No image files are included.');});
+async function poll(subid){$('submission').value=subid;const limit=Math.min(18,Math.max(1,Number(config.maxPolls)||12));for(let n=0;n<limit;n++){status(`Submission ${subid} · checking for a solved job (${n+1}/${limit})…`);const data=await json(adapter(`/api/submission/${subid}`),{credentials:'include'});if(data.receipt){add(data.receipt);status(`Submission ${subid} solved. Save the receipt before closing this tab.`);return;}if(data.failed)throw Error(`Submission ${subid} finished without a solved field. Try better scale bounds or a clearer image.`);if(n+1<limit)await new Promise(resolve=>setTimeout(resolve,Math.max(3000,Math.min(15000,config.pollIntervalMs||10000))));}status(`Submission ${subid} is still processing. Keep this ID and use Resume submission later; no second image is submitted.`);}
+$('solve-form').addEventListener('submit',e=>{e.preventDefault();action(async()=>{if(!config.adapterUrl)throw Error('No owner upload adapter is configured.');const file=$('photo').files[0],url=$('image-url').value.trim();if(Boolean(file)===Boolean(url))throw Error('Choose one image file or one public URL.');if(!$('rights').checked)throw Error('Confirm your permission to submit this image.');const form=new FormData();if(file){if(file.size>Math.min(config.maxFileBytes||10485760,10485760))throw Error('Maximum image size is 10 MB.');if(!/\.(jpe?g|png|fits?|fts)$/i.test(file.name))throw Error('Use JPEG, PNG or FITS.');form.append('file',file);}else form.append('url',publicImageUrl(url));const lower=$('scale-low').value,upper=$('scale-high').value;if(lower||upper){if(!(Number(lower)>0&&Number(upper)>Number(lower)&&Number(upper)<=180))throw Error('Set both scale bounds between 0 and 180°, with maximum greater than minimum.');form.append('scale_lower',lower);form.append('scale_upper',upper);}form.append('consent','yes');status('Sending the image to your owner adapter and Astrometry.net…');const data=await json(adapter('/api/solve'),{method:'POST',credentials:'include',body:form});if(!/^\d+$/.test(String(data.subid)))throw Error('Provider did not return a submission ID.');await poll(String(data.subid));});});
+$('resume-form').addEventListener('submit',e=>{e.preventDefault();action(()=>poll(jobId($('submission').value)));});
+try{config=await json('./config.json');if(config.adapterUrl){const u=new URL(config.adapterUrl);if(u.protocol!=='https:'||u.username||u.password||u.search||u.hash)throw Error('Invalid adapter URL in configuration.');$('adapter-panel').hidden=false;$('adapter-login').href=adapter('/');$('connection-note').textContent='Existing jobs are read through your authenticated owner adapter.';}else $('connection-note').textContent='Public reference and imported receipts work here immediately. Other jobs can be retrieved through the owner workflow; the provider does not allow direct browser API reads.';$('workflow').href=config.ownerWorkflow;$('job-workflow').href=config.ownerWorkflow;}catch(e){status(`Configuration could not load: ${e.message}`);}

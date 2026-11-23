@@ -1,21 +1,8 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
-import { cleanLines } from '../web/model.mjs';
-test('trims, removes blanks and preserves first-seen order', () => {
-  assert.deepEqual(cleanLines('  Halifax\nLangley\nHalifax\n\nVancouver  '), {
-    text: 'Halifax\nLangley\nVancouver', count: 3, removed: 1,
-  });
-});
-test('supports Windows and old Mac line endings', () => {
-  assert.equal(cleanLines('a\r\nb\ra').text, 'a\nb');
-});
-test('empty text and whitespace produce an empty result', () => {
-  assert.deepEqual(cleanLines(' \n\t'), { text: '', count: 0, removed: 0 });
-});
-test('preserves case and Unicode', () => {
-  assert.equal(cleanLines('Québec\nquébec\n東京\nQuébec').text, 'Québec\nquébec\n東京');
-});
-test('treats markup as ordinary text', () => {
-  assert.equal(cleanLines('<script>alert(1)</script>\n<script>alert(1)</script>').text, '<script>alert(1)</script>');
-});
-test('rejects non-text input', () => { assert.throws(() => cleanLines(null), TypeError); });
+import test from 'node:test';import assert from 'node:assert/strict';import {readFile} from 'node:fs/promises';import {receipt,jobId,fromProvider,compare,publicImageUrl,raHours} from '../web/model.mjs';
+const example=JSON.parse(await readFile(new URL('../web/data/example.json',import.meta.url)));
+test('genuine receipt validates and field width is not radius',()=>{const r=receipt(example);assert.equal(r.jobId,'1493115');assert.ok(r.calibration.width_arcsec>5000);assert.notEqual(r.calibration.radius*2,r.calibration.width_arcsec/3600);assert.equal(raHours(360),'00h 00m 00s');});
+test('job parser rejects unrelated IDs, injected URLs and status submission URLs',()=>{assert.equal(jobId('https://nova.astrometry.net/api/jobs/1493115/info/'),'1493115');for(const x of ['-1','0','1.5','https://evil.example/api/jobs/12/','https://nova.astrometry.net/status/123','https://nova.astrometry.net.evil.com/api/jobs/12/'])assert.throws(()=>jobId(x));});
+test('receipt numbers and successful status are mandatory',()=>{assert.throws(()=>receipt({...example,calibration:{...example.calibration,ra:NaN}}));assert.throws(()=>receipt({...example,calibration:{...example.calibration,pixscale:0}}));assert.throws(()=>fromProvider('12',{status:'failure'}));});
+test('comparison handles zero and RA wrap without false 360 degree jump',()=>{const a=receipt(example),b=receipt(example);assert.equal(compare(a,b).separation,0);a.calibration.ra=359;b.calibration.ra=1;a.calibration.dec=b.calibration.dec=0;a.calibration.orientation=179;b.calibration.orientation=-179;assert.ok(Math.abs(compare(a,b).separation-2)<1e-9);assert.equal(compare(a,b).rotation,2);});
+test('URL submission only accepts public HTTPS hostname inputs',()=>{assert.equal(publicImageUrl('https://images.example.org/a.jpg'),'https://images.example.org/a.jpg');for(const x of ['http://images.example.org/a','https://127.0.0.1/a','https://[::1]/a','https://host.local/a','https://user:pass@images.example.org/a','https://images.example.org:8888/a'])assert.throws(()=>publicImageUrl(x));});
+test('only known receipt fields are imported, no credential/session retention',()=>{const r=receipt({...example,apikey:'NO',session:'NO',sourceUrl:'javascript:bad()'});assert.ok(!('apikey'in r));assert.ok(!('session'in r));assert.ok(!('sourceUrl'in r));});

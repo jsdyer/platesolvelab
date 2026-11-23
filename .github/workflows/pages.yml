@@ -26,6 +26,11 @@ jobs:
         run: node --test tests/*.test.mjs
       - name: Test the builder
         run: python3 -m unittest discover -s tests -v
+      - name: Verify owner Astrometry key without submitting an image
+        if: github.repository == 'jsdyer/platesolvelab' && github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+        env:
+          ASTROMETRY_API_KEY: ${{ secrets.ASTROMETRY_API_KEY }}
+        run: python3 scripts/solve.py --check-key
       - name: Build the static application
         run: python3 scripts/build.py
       - name: Check whether the tool has been initialized

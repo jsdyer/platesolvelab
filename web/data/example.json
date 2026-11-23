@@ -1,0 +1,24 @@
+{
+  "schema": "coolcode.platesolve.v1",
+  "jobId": "1493115",
+  "capturedAt": "2026-11-23T08:09:42.773907+00:00",
+  "name": "Leo Triplet-1.jpg",
+  "calibration": {
+    "ra": 169.96633791366915,
+    "dec": 13.221011585315143,
+    "width_arcsec": 5027.99363323464,
+    "height_arcsec": 2964.443968575217,
+    "radius": 0.8106715896625917,
+    "pixscale": 1.0906710701159739,
+    "orientation": 74.25057920908068,
+    "parity": 1.0
+  },
+  "objects": [
+    "NGC 3627",
+    "M 66",
+    "NGC 3628",
+    "NGC 3623",
+    "M 65"
+  ],
+  "note": "Read-only capture of the public job used in Astrometry.net API documentation. This is real provider metadata, not a new solve. Original image is not redistributed; follow the provider link for its record and rights."
+}

@@ -1,0 +1,78 @@
+name: Plate Solve · Owner receipt
+on:
+  workflow_dispatch:
+    inputs:
+      job_id:
+        description: 'Read an existing solved job (no upload); choose only one of job, submission or image URL'
+        type: string
+      submission_id:
+        description: 'Resume a submission ID from an earlier run (no second upload)'
+        type: string
+      image_url:
+        description: 'Public HTTPS sky-image URL you have permission to submit (workflow inputs and artifacts are public)'
+        type: string
+      confirm_public_image:
+        description: 'I permit this public image to be sent to Astrometry: non-public visibility, no commercial use or modifications'
+        type: boolean
+        default: false
+      lower_width_degrees:
+        description: 'Optional minimum field width in degrees (provide both bounds)'
+        type: string
+      upper_width_degrees:
+        description: 'Optional maximum field width in degrees (provide both bounds)'
+        type: string
+      check_key_only:
+        description: 'Only validate the saved API key; no photo or results submitted'
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: platesolve-owner
+  cancel-in-progress: false
+jobs:
+  solve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Retrieve or submit explicitly requested image
+        env:
+          ASTROMETRY_API_KEY: ${{ secrets.ASTROMETRY_API_KEY }}
+          JOB_ID: ${{ inputs.job_id }}
+          SUBMISSION_ID: ${{ inputs.submission_id }}
+          IMAGE_URL: ${{ inputs.image_url }}
+          CONSENT: ${{ inputs.confirm_public_image }}
+          CHECK_KEY: ${{ inputs.check_key_only }}
+          LOWER: ${{ inputs.lower_width_degrees }}
+          UPPER: ${{ inputs.upper_width_degrees }}
+        run: |
+          python3 - <<'PY'
+          import os, subprocess, sys
+          jobs=[(flag, os.environ.get(key,'').strip()) for flag,key in [('--job-id','JOB_ID'),('--submission-id','SUBMISSION_ID'),('--image-url','IMAGE_URL')]]
+          chosen=[(flag,value) for flag,value in jobs if value]
+          check=os.environ.get('CHECK_KEY')=='true'
+          if len(chosen)+int(check)!=1: sys.exit('Choose exactly one: job ID, submission ID, public image URL, or key check.')
+          args=[sys.executable,'scripts/solve.py']
+          if check: args+=['--check-key']
+          else:
+            flag,value=chosen[0]
+            if flag=='--image-url' and os.environ.get('CONSENT')!='true': sys.exit('Confirm permission before submitting a public image.')
+            args += [flag,value]
+          for flag,key in [('--lower','LOWER'),('--upper','UPPER')]:
+            if os.environ.get(key,'').strip(): args += [flag,os.environ[key].strip()]
+          subprocess.run(args,check=True)
+          PY
+      - name: Downloadable metadata receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: plate-solve-receipt
+          path: receipts/
+          if-no-files-found: ignore
+          retention-days: 30

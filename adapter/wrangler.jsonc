@@ -1,0 +1,23 @@
+{
+  "name": "platesolvelab-owner",
+  "main": "worker.mjs",
+  "compatibility_date": "2026-11-23",
+  "workers_dev": false,
+  "vars": {
+    "ALLOWED_ORIGIN": "https://coolcode.ca",
+    "CF_ACCESS_TEAM_DOMAIN": "YOUR-TEAM.cloudflareaccess.com",
+    "CF_ACCESS_AUD": "YOUR-ACCESS-APPLICATION-AUD",
+    "OWNER_EMAIL": "YOUR-OWNER-EMAIL"
+  },
+  "observability": {
+    "enabled": true,
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 1
+    },
+    "traces": {
+      "enabled": true,
+      "head_sampling_rate": 0.01
+    }
+  }
+}

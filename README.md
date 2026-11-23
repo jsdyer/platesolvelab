@@ -1,116 +1,59 @@
-# CoolCode browser tool template
+# Plate Solve Lab
 
-A starting point for independent tools at `coolcode.ca/<repo>/`: a working local-text
-example, responsive UI, Python standard-library build, Node tests, PR checks and Pages
-publication. No npm install is needed.
-
-## Using the example
+A static, useful Astrometry.net result viewer plus an owner workflow for new sky-image solves. Inspect celestial coordinates, calibrated field width/height, orientation, pixel scale and named objects; retain dated JSON receipts and compare two frames. No frontend secret and no automatic photo upload.
 
 <!-- coolcode:guide -->
-The first occurrence of each trimmed line keeps its place. Compare the output with the original text before copying the result.
+Open **Open real example** to explore a genuine Leo Triplet solve. Use **Import receipt JSON** to load one or more workflow receipts; **Save receipts JSON** downloads your session. Receipts stay only in the tab until saved. Comparison reports centre separation, orientation change and pixel-scale change.
+
+To solve your own image, open **Owner solve workflow**, choose **Run workflow**, supply a public HTTPS photo URL and confirm your permission to submit it. After completion download the **plate-solve-receipt** artifact, unzip it and import `receipt.json`. The existing repository secret `ASTROMETRY_API_KEY` is used only by Actions. For an existing Astrometry job, enter its numeric **job ID** in the workflow instead of uploading. Submission IDs and image IDs are different; use the separate **submission_id** input to resume a queued submission.
+
+The public page does not ask for your API key. Astrometry's API lacks cross-origin permission for direct browser calls. Arbitrary job inspection therefore uses the owner workflow, or the optional authenticated adapter. Visitors can upload directly at Astrometry.net and inspect its native results. Edit `web/config.json` to connect a dedicated adapter; instructions below. The real example works immediately with no service setup.
 <!-- /coolcode:guide -->
 
-For a real tool, replace this paragraph with one or two plain-text sentences
-about an example, a limit or how to interpret the results. Keep the source,
-coverage, refresh behaviour and a worked example in this README as appropriate.
-When updating a tool, revise any details its behaviour has changed and keep the
-homepage's shorter data-source sentence in `tool.json` accurate.
-The hub imports the marked note into the catalogue README.
+## Source and provenance
 
-## One-time template setup
+Provider: [Astrometry.net API](https://astrometry.net/doc/net/api.html), [official source](https://github.com/dstndstn/astrometry.net/blob/main/net/api.py). `web/data/example.json` is a genuine read-only capture of public job **1493115**, the job shown in the provider API documentation. It was retrieved on 2026-11-23. No sample photo was copied, relicensed or resubmitted. The original image's rights are not asserted by this project; open provider result links to inspect it. Calibration width/height come from `/api/jobs/1493115/calibration/`; `/info/` alone omits these fields. The provider returns JSON with `text/plain`, which is supported here. A normal API GET was verified; `Access-Control-Allow-Origin` was absent.
 
-Enable **Settings → General → Template repository** here. This repository does not
-need Pages enabled: its workflow builds/tests but intentionally skips deployment.
-New copies also skip deployment until `scripts/init.py` sets the tool ID to match
-their repository name. This lets you create the repo before configuring Pages.
+A capture timestamp is the metadata retrieval time, not photo exposure time. Provider orientation is shown as supplied; historical solver changes can alter its convention. Frame comparison is a positional comparison, not photometric analysis, plate-solve confidence, sharpness or tracking-error measurement. The diagram is deliberately a labelled orientation schematic, not a synthetic sky image. Field radius is not treated as width.
 
-## Start a new tool
+## Owner workflow and key
 
-1. Select **Use this template → Create a new repository**, choose owner `jsdyer`,
-   a unique lowercase name such as `my-tool`, and public visibility.
-2. Clone the new repository. Use Python 3.12+ and Node 24+.
-3. Set the identity, using a slug that matches the repository name:
+1. Repository → **Settings → Secrets and variables → Actions**: save **`ASTROMETRY_API_KEY`**. The user already has this configured.
+2. Actions → **Plate Solve · Owner receipt** → Run workflow. Exactly one of `job_id`, `submission_id`, `image_url`, or `check_key_only` is required. Key check authenticates without submitting anything.
+3. `image_url` must point to a public JPEG/PNG/FITS sky image. URL inputs in a public Actions repository and downloadable artifacts are visible to others; never use confidential source URLs or private photos here. The URL is sent to Astrometry to fetch; image bytes are not retained in the repository. No URL, session or key is deliberately logged by the client, although workflow inputs themselves are public.
+4. Photo submissions explicitly set `publicly_visible=n`, `allow_commercial_use=n`, `allow_modifications=n`. These provider controls are not a confidentiality guarantee. The workflow requires an affirmative permission checkbox. It does not select a Creative Commons licence on your behalf.
+5. Optional width bounds in degrees can improve solving. Set both, e.g. `1` and `3`, based on your lens/sensor. Other tuning is in `scripts/solve.py: solve_options`; defaults use downsampling 2. Do not invent bounds for an unknown image.
+6. The client polls at most 36 times, 10 seconds apart, with request timeouts. A slow solve leaves `submission.json` in the artifact and a provider link in the summary. Rerun with its `submission_id` to continue without uploading again. A successful result adds `receipt.json`. Retention is 30 days: download receipts you want to keep.
 
-```sh
-python3 scripts/init.py my-tool --title "My Tool" --description "Describe what this tool does."
+Image solving is manual and read-only for repository contents. The Pages workflow also validates the saved API key on trusted main-branch pushes or manual main-branch runs in `jsdyer/platesolvelab`; it calls only the login endpoint and submits no photos. A failed key validation blocks that Pages build so the owner can correct the saved key. Pull-request runs never receive the secret or perform the authentication check. API error bodies are intentionally omitted from logs because they can contain sensitive request data. New observations are not automatically published to the public site.
+
+## Optional live upload: dedicated authenticated Worker
+
+Nothing here changes your existing Cloudflare router or `toolList`. The public app is useful without this adapter. This optional path lets the owner inspect arbitrary jobs and upload local files directly through their own service, without exposing the Astrometry key.
+
+1. Choose a **dedicated custom hostname**, ideally `platesolve-api.coolcode.ca`. In Cloudflare Zero Trust, create a self-hosted **Access application** for that hostname, with an Allow policy restricted to your own email identity. Do not create a public Bypass policy.
+2. Set `CF_ACCESS_TEAM_DOMAIN`, the Access application's `CF_ACCESS_AUD`, and `OWNER_EMAIL` in `adapter/wrangler.jsonc`. `ALLOWED_ORIGIN` is `https://coolcode.ca`. Keep `workers_dev: false`; add the dedicated hostname as a custom-domain route. Example `routes: [{"pattern":"platesolve-api.coolcode.ca","custom_domain":true}]` only after that hostname and its Access policy are ready. The adapter fails closed until issuer, audience and owner are configured.
+3. In the adapter directory run `npx wrangler secret put ASTROMETRY_API_KEY`, entering your key at the prompt. GitHub Actions secrets do not automatically transfer to Workers. Then `npx wrangler deploy`. Never put the key in JSON, frontend config or source control.
+4. Configure Access CORS to allow `https://coolcode.ca`, credentials, methods GET/POST/OPTIONS and Content-Type. Allow unauthenticated **OPTIONS preflight only** to reach the Worker; its preflight handler permits no API data. Requests still require a signed Access JWT. Log in by opening the adapter hostname in a top-level browser tab; then return to Plate Solve Lab. A same-site custom hostname helps avoid third-party-cookie restrictions.
+5. Set `web/config.json` `adapterUrl` to `https://platesolve-api.coolcode.ca`, commit, rebuild. The existing-job form now fetches through the adapter and the local-file upload panel appears. It accepts JPEG, PNG or FITS up to 10 MB, explicit submission consent, optional field-width bounds, and resumable bounded polling. If auth expires, reopen owner sign-in and retry.
+
+Deployment guidance follows [Cloudflare Access JWT validation](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/authorization-cookie/validating-json/) and [custom domain configuration](https://developers.cloudflare.com/workers/configuration/routing/custom-domains/). Logs and sampled traces are enabled, with no custom logging of image data, API keys or sessions.
+
+The Worker independently validates RS256 signature, issuer, audience, expiry and exact owner email against Cloudflare Access signing keys, rejects other origins, exposes only fixed Astrometry routes, caps file/response size, and never returns sessions or API keys. It does not fetch arbitrary destinations itself or offer an open proxy. No malware/sample-file downloads or local execution are involved. Do not remove Access authentication to make this an anonymous shared-key service. A multi-user service needs per-user account handling and explicit quota management.
+
+## Expand and run
+
+- `web/config.json`: adapter URL, workflow URL, example receipt path, upload limit (maximum 10 MB), poll interval/count. Nothing requires a fixed celestial-object list.
+- Any valid successful Astrometry job can become a receipt. Import up to 100 at once and retain up to 300 per tab. JSON imports are validated, external text uses textContent, and links are derived only from numeric IDs.
+- `scripts/solve.py --job-id 1493115` exports an existing public solve with no key needed. `--check-key` validates the environment secret only. `--image-url` requires the secret; use the consent-aware workflow for regular owner use.
+- Optional CLI bounds: `--lower 1 --upper 3`; `--submission-id` resumes a job; `--output` changes the receipt output directory.
+
+## Checks and publication
+
 ```
-
-Review the category, tags and icon in `tool.json`. `access: "browser"` tells the main
-catalogue that the tool works immediately without installation. `--owner` supports a different
-GitHub owner, but only projects owned by `jsdyer` inherit the CoolCode domain.
-
-4. Replace the example in `web/` and its tests. Update the privacy explanation,
-   source attribution and README to describe the real tool.
-5. Test and preview:
-
-```sh
 node --test tests/*.test.mjs
 python3 -m unittest discover -s tests -v
 python3 scripts/build.py
-python3 -m http.server 8000 --directory dist
 ```
 
-Open `http://localhost:8000/`. The example trims lines, skips blanks and removes exact
-duplicates, preserving first-seen order and capitalization. It processes the text in tab memory. Update that explanation if your app behaves differently.
-
-CI also tests the browser flow and mobile layout at a project subpath. Replace the
-sample assertions in `tests/browser_smoke.py` when implementing your own UI. To run
-that check locally (optional for ordinary preview):
-
-```sh
-python3 -m venv .venv
-. .venv/bin/activate
-python3 -m pip install -r tests/browser-requirements.txt
-python3 -m playwright install --with-deps chromium
-python3 tests/browser_smoke.py
-```
-
-Playwright is a test-only dependency; the app and its static build do not use it.
-
-## Publish and register
-
-When the actual tool is ready, in the **new tool repository** set **Settings → Pages → Build and deployment →
-Source → GitHub Actions**. Push to `main`, or manually run **Browser tool · Check and
-publish** after enabling Pages. If the initial deployment ran before Pages was enabled,
-enable it and rerun. PRs only check/build and provide a downloadable preview artifact.
-
-Keep `{{VISIT_COUNTER}}` in the page head and `{{ISSUE_LINK}}` in the footer when replacing the starter UI. The build enables these for initialized CoolCode repositories. The shared counter records aggregate opens on coolcode.ca by public tool ID. Toolbox inputs and URL parameters are excluded. The issue link opens a reporting form with the tool already selected.
-
-Keep app-owned asset paths and module imports relative. Check `https://coolcode.ca/my-tool/`.
-Do not add a CNAME or set `coolcode.ca` as this project's custom domain; the account
-site supplies it. Only successful `main` builds deploy.
-
-After verifying the app, copy the reviewed object from `tool.json` into `data/tools.json`
-in [the main site](https://github.com/jsdyer/jsdyer.github.io). Each tool still builds
-independently. Update the hub record when listing metadata changes; the hub is the
-authority for discovery. Ordinary app updates touch only this repository.
-
-The main site separates **Use in your browser** from **Install yourself**. An app
-that asks for a file is still a browser tool. Standalone Linux packages should start
-in their own repositories with their own build/release workflow, rather than copying
-this browser-only scaffold. Their hub record uses `access: "install"`, links to an
-installation guide, and includes `requirements`.
-
-## Files
-
-| Path | Purpose |
-| --- | --- |
-| `tool.json` | Page metadata and a ready-to-copy catalogue record |
-| `web/` | HTML, responsive CSS, DOM interactions and separate model logic |
-| `scripts/build.py` | Escape metadata and build `web/` into `dist/` |
-| `scripts/init.py` | Set a new project's identity |
-| `tests/` | Application and builder tests |
-| `.github/workflows/pages.yml` | Check PRs and publish successful main builds |
-| `AGENTS.md` | Instructions for future coding work |
-
-Namespace optional storage as `coolcode:<tool-id>:<key>`; CoolCode paths share a
-browser origin. Don't save pasted text/uploads by default. Document external APIs
-and send only the information needed for the selected action. Never embed secrets.
-
-Scheduled refresh is opt-in. Validate source data before deploying, display its date,
-and preserve the last good deployment on failure. Public-repository schedules can
-stop after 60 days without repository activity.
-
-Templates don't propagate future edits automatically. Adopt fixes explicitly and
-consider a versioned reusable workflow once several tools confirm the shared process.
-Choose and add the intended software license before distributing a new project.
+GitHub Pages CI runs those checks plus a Chromium smoke test at a project subpath, screenshots, import/comparison/export and mobile overflow checks. Browser tests mock external API calls; they never submit photos or need secrets. `dist/`, receipt artifacts and source images are not committed. Pages deploys from main; no CNAME file is used. No scheduled scan or image upload is configured.
