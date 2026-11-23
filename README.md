@@ -3,13 +3,13 @@
 A static, useful Astrometry.net result viewer plus an owner workflow for new sky-image solves. Inspect celestial coordinates, calibrated field width/height, orientation, pixel scale and named objects; retain dated JSON receipts and compare two frames. No frontend secret and no automatic photo upload.
 
 <!-- coolcode:guide -->
-Open **Open real example** to explore a genuine Leo Triplet solve. Use **Import receipt JSON** to load one or more workflow receipts; **Save receipts JSON** downloads your session. Receipts stay only in the tab until saved. Comparison reports centre separation, orientation change and pixel-scale change.
+Open **Open real example** to explore a genuine Leo Triplet solve. Use **Import receipt JSON** to load one or more receipts; **Save receipts JSON** downloads your session. Receipts stay only in the tab until saved. Comparison reports centre separation, orientation change and pixel-scale change.
 
-To solve your own image, open **Owner solve workflow**, choose **Run workflow**, supply a public HTTPS photo URL and confirm your permission to submit it. After completion download the **plate-solve-receipt** artifact, unzip it and import `receipt.json`. The existing repository secret `ASTROMETRY_API_KEY` is used only by Actions. For an existing Astrometry job, enter its numeric **job ID** in the workflow instead of uploading. Submission IDs and image IDs are different; use the separate **submission_id** input to resume a queued submission.
+To solve your own image, follow the owner upload link to https://platesolve-api.hackme.ca/, which opens in a separate tab. Sign in as the allowed owner, choose a local JPEG, PNG or FITS sky photo (up to 10 MB), confirm your permission to send it to Astrometry.net, then upload and solve. Download the completed JSON receipt, return to Plate Solve Lab and choose **Import receipt JSON**. If solving is still queued, keep the submission ID and use **Check submission** in the portal later. The portal also reads existing Astrometry job IDs. The public viewer stays open to everyone; the linked upload portal requires the owner's Access sign-in.
 
-For local photo uploads, the dedicated owner portal can run at its own workers.dev address. Follow the dashboard setup guide below, sign in, upload a sky photo and download its JSON receipt for this viewer. This needs no DNS changes; the key is stored separately as a Worker secret.
+The **Owner solve workflow** remains an alternative for public HTTPS image URLs and existing jobs. Choose **Run workflow**, supply exactly one input, then download the **plate-solve-receipt** artifact, unzip it and import `receipt.json`. Use **submission_id** to resume a queued submission without uploading again. The repository secret `ASTROMETRY_API_KEY` is used only by Actions; the portal has its own Worker Secret.
 
-The public page does not ask for your API key. Astrometry's API lacks cross-origin permission for direct browser calls. Arbitrary job inspection therefore uses the owner workflow, or the optional authenticated adapter. Visitors can upload directly at Astrometry.net and inspect its native results. Edit `web/config.json` to connect a dedicated adapter; instructions below. The real example works immediately with no service setup.
+The public page never asks for your API key. Its owner link is configurable through `web/config.json` → `ownerPortalUrl`; this simply opens the protected page. The separate `adapterUrl` setting remains empty because inline cross-origin upload is not enabled. Visitors can also upload through Astrometry.net using their own account and inspect its native results. The real example works immediately with no service setup.
 <!-- /coolcode:guide -->
 
 ## Source and provenance
@@ -29,17 +29,22 @@ A capture timestamp is the metadata retrieval time, not photo exposure time. Pro
 
 Image solving is manual and read-only for repository contents. The Pages workflow also validates the saved API key on trusted main-branch pushes or manual main-branch runs in `jsdyer/platesolvelab`; it calls only the login endpoint and submits no photos. A failed key validation blocks that Pages build so the owner can correct the saved key. Pull-request runs never receive the secret or perform the authentication check. API error bodies are intentionally omitted from logs because they can contain sensitive request data. New observations are not automatically published to the public site.
 
-## Optional live upload: dedicated authenticated Worker
+## Owner upload portal and optional inline adapter
 
-**For a first upload, use the [dashboard-only owner portal setup](adapter/DASHBOARD.md).** It runs at the Worker’s own `workers.dev` address and includes a same-origin upload form plus receipt download. No DNS change, CORS setup, CLI or public viewer configuration is required. The [single-file Worker](adapter/worker-dashboard.mjs) is ready to paste into the Dashboard editor. The custom-hostname instructions below are an optional later integration.
+The linked owner portal is **[https://platesolve-api.hackme.ca/](https://platesolve-api.hackme.ca/)**. Open it in a separate top-level tab, sign in through Cloudflare Access, and use its upload, existing-job and submission-status controls. After solving, download the receipt and import it into the public viewer. The portal page and its API share one origin, so this flow does not depend on cross-site cookies or CORS permissions from CoolCode.
 
-Nothing here changes your existing Cloudflare router or `toolList`. The public app is useful without this adapter. This optional path lets the owner inspect arbitrary jobs and upload local files directly through their own service, without exposing the Astrometry key.
+`web/config.json` keeps two separate settings:
 
-1. Choose a **dedicated custom hostname**, ideally `platesolve-api.coolcode.ca`. In Cloudflare Zero Trust, create a self-hosted **Access application** for that hostname, with an Allow policy restricted to your own email identity. Do not create a public Bypass policy.
-2. Set `CF_ACCESS_TEAM_DOMAIN`, the Access application's `CF_ACCESS_AUD`, and `OWNER_EMAIL` in `adapter/wrangler.jsonc`. `ALLOWED_ORIGIN` is `https://coolcode.ca`. For a custom-hostname-only deployment you can set `workers_dev: false`; the first-test owner portal instead leaves it enabled. Add the dedicated hostname as a custom-domain route. Example `routes: [{"pattern":"platesolve-api.coolcode.ca","custom_domain":true}]` only after that hostname and its Access policy are ready. The adapter fails closed until issuer, audience and owner are configured.
-3. In the adapter directory run `npx wrangler secret put ASTROMETRY_API_KEY`, entering your key at the prompt. GitHub Actions secrets do not automatically transfer to Workers. Then `npx wrangler deploy`. Never put the key in JSON, frontend config or source control.
-4. For cross-origin calls from the public viewer, enable **Bypass OPTIONS requests to origin** in the Access application’s Advanced CORS settings. The Worker supplies `https://coolcode.ca`, credentials, GET/POST/OPTIONS and Content-Type response permissions. Only unauthenticated OPTIONS preflight reaches the Worker; its preflight handler permits no API data. Requests still require a signed Access JWT. Log in by opening the adapter hostname in a top-level browser tab; then return to Plate Solve Lab. A same-site custom hostname helps avoid third-party-cookie restrictions.
-5. Set `web/config.json` `adapterUrl` to `https://platesolve-api.coolcode.ca`, commit, rebuild. The existing-job form now fetches through the adapter and the local-file upload panel appears. It accepts JPEG, PNG or FITS up to 10 MB, explicit submission consent, optional field-width bounds, and resumable bounded polling. If auth expires, reopen owner sign-in and retry.
+| Setting | Current value | Purpose |
+| --- | --- | --- |
+| `ownerPortalUrl` | `https://platesolve-api.hackme.ca/` | Destination of the owner upload link; opens the protected portal in a new tab. |
+| `adapterUrl` | `""` | Optional direct API connection for job lookup and upload inside the public viewer. Leave empty for the linked-portal flow. |
+
+Changing `ownerPortalUrl` only changes a navigation link; it does not change Cloudflare, DNS, Access policy or the upload service. Keep the Astrometry key in the Worker's **`ASTROMETRY_API_KEY` Secret**. GitHub Actions secrets do not transfer to Cloudflare, and neither key belongs in public configuration.
+
+For a fresh deployment or updates, follow the [dashboard-only setup guide](adapter/DASHBOARD.md) and use the complete [single-file Worker](adapter/worker-dashboard.mjs). A protected `workers.dev` address is also supported without moving DNS. No change to the existing CoolCode router or `toolList` is needed.
+
+Inline integration through `adapterUrl` is a separate optional setup. It needs a tested authenticated cross-origin connection and Access preflight configuration; a link to the portal does not establish that connection. In particular, `hackme.ca` and `coolcode.ca` are different sites, so the current top-level portal flow avoids relying on third-party cookies. See the setup guide before enabling an inline adapter.
 
 Deployment guidance follows [Cloudflare Access JWT validation](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/authorization-cookie/validating-json/) and [custom domain configuration](https://developers.cloudflare.com/workers/configuration/routing/custom-domains/). Logs and sampled traces are enabled, with no custom logging of image data, API keys or sessions.
 
@@ -47,7 +52,7 @@ The Worker independently validates RS256 signature, issuer, audience, expiry and
 
 ## Expand and run
 
-- `web/config.json`: adapter URL, workflow URL, example receipt path, upload limit (maximum 10 MB), poll interval/count. Nothing requires a fixed celestial-object list.
+- `web/config.json`: `ownerPortalUrl` for the separate owner upload page; optional `adapterUrl` for inline API access; workflow URL, example receipt path, upload limit (maximum 10 MB), poll interval/count. Nothing requires a fixed celestial-object list.
 - Any valid successful Astrometry job can become a receipt. Import up to 100 at once and retain up to 300 per tab. JSON imports are validated, external text uses textContent, and links are derived only from numeric IDs.
 - `scripts/solve.py --job-id 1493115` exports an existing public solve with no key needed. `--check-key` validates the environment secret only. `--image-url` requires the secret; use the consent-aware workflow for regular owner use.
 - Optional CLI bounds: `--lower 1 --upper 3`; `--submission-id` resumes a job; `--output` changes the receipt output directory.

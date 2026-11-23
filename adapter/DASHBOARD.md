@@ -1,6 +1,8 @@
 # Owner photo uploads using only the Cloudflare dashboard
 
-The quickest first test uses the Worker's own **workers.dev** address. You do not need to move DNS, add a CNAME, install Wrangler, expose an API key to the public site, or configure cross-origin cookies.
+The current owner portal is [https://platesolve-api.hackme.ca/](https://platesolve-api.hackme.ca/), linked from Plate Solve Lab in a separate tab. Sign in there, upload and solve, then download the receipt and import it into the public viewer. The public link uses `web/config.json` → `ownerPortalUrl`; `adapterUrl` remains empty. No additional DNS or cross-origin setup is required to use this linked portal.
+
+For a fresh deployment, the quickest first test uses the Worker's own **workers.dev** address. You do not need to move DNS, add a CNAME, install Wrangler, expose an API key to the public site, or configure cross-origin cookies.
 
 The Worker includes a sign-in-protected upload page. Open that page directly, submit a photo, download its receipt, and import it into [Plate Solve Lab](https://coolcode.ca/platesolvelab/). The public viewer remains available to everyone; your upload service is owner-only.
 
