@@ -7,6 +7,8 @@ Open **Open real example** to explore a genuine Leo Triplet solve. Use **Import 
 
 To solve your own image, open **Owner solve workflow**, choose **Run workflow**, supply a public HTTPS photo URL and confirm your permission to submit it. After completion download the **plate-solve-receipt** artifact, unzip it and import `receipt.json`. The existing repository secret `ASTROMETRY_API_KEY` is used only by Actions. For an existing Astrometry job, enter its numeric **job ID** in the workflow instead of uploading. Submission IDs and image IDs are different; use the separate **submission_id** input to resume a queued submission.
 
+For local photo uploads, the dedicated owner portal can run at its own workers.dev address. Follow the dashboard setup guide below, sign in, upload a sky photo and download its JSON receipt for this viewer. This needs no DNS changes; the key is stored separately as a Worker secret.
+
 The public page does not ask for your API key. Astrometry's API lacks cross-origin permission for direct browser calls. Arbitrary job inspection therefore uses the owner workflow, or the optional authenticated adapter. Visitors can upload directly at Astrometry.net and inspect its native results. Edit `web/config.json` to connect a dedicated adapter; instructions below. The real example works immediately with no service setup.
 <!-- /coolcode:guide -->
 
@@ -29,12 +31,14 @@ Image solving is manual and read-only for repository contents. The Pages workflo
 
 ## Optional live upload: dedicated authenticated Worker
 
+**For a first upload, use the [dashboard-only owner portal setup](adapter/DASHBOARD.md).** It runs at the Worker’s own `workers.dev` address and includes a same-origin upload form plus receipt download. No DNS change, CORS setup, CLI or public viewer configuration is required. The [single-file Worker](adapter/worker-dashboard.mjs) is ready to paste into the Dashboard editor. The custom-hostname instructions below are an optional later integration.
+
 Nothing here changes your existing Cloudflare router or `toolList`. The public app is useful without this adapter. This optional path lets the owner inspect arbitrary jobs and upload local files directly through their own service, without exposing the Astrometry key.
 
 1. Choose a **dedicated custom hostname**, ideally `platesolve-api.coolcode.ca`. In Cloudflare Zero Trust, create a self-hosted **Access application** for that hostname, with an Allow policy restricted to your own email identity. Do not create a public Bypass policy.
-2. Set `CF_ACCESS_TEAM_DOMAIN`, the Access application's `CF_ACCESS_AUD`, and `OWNER_EMAIL` in `adapter/wrangler.jsonc`. `ALLOWED_ORIGIN` is `https://coolcode.ca`. Keep `workers_dev: false`; add the dedicated hostname as a custom-domain route. Example `routes: [{"pattern":"platesolve-api.coolcode.ca","custom_domain":true}]` only after that hostname and its Access policy are ready. The adapter fails closed until issuer, audience and owner are configured.
+2. Set `CF_ACCESS_TEAM_DOMAIN`, the Access application's `CF_ACCESS_AUD`, and `OWNER_EMAIL` in `adapter/wrangler.jsonc`. `ALLOWED_ORIGIN` is `https://coolcode.ca`. For a custom-hostname-only deployment you can set `workers_dev: false`; the first-test owner portal instead leaves it enabled. Add the dedicated hostname as a custom-domain route. Example `routes: [{"pattern":"platesolve-api.coolcode.ca","custom_domain":true}]` only after that hostname and its Access policy are ready. The adapter fails closed until issuer, audience and owner are configured.
 3. In the adapter directory run `npx wrangler secret put ASTROMETRY_API_KEY`, entering your key at the prompt. GitHub Actions secrets do not automatically transfer to Workers. Then `npx wrangler deploy`. Never put the key in JSON, frontend config or source control.
-4. Configure Access CORS to allow `https://coolcode.ca`, credentials, methods GET/POST/OPTIONS and Content-Type. Allow unauthenticated **OPTIONS preflight only** to reach the Worker; its preflight handler permits no API data. Requests still require a signed Access JWT. Log in by opening the adapter hostname in a top-level browser tab; then return to Plate Solve Lab. A same-site custom hostname helps avoid third-party-cookie restrictions.
+4. For cross-origin calls from the public viewer, enable **Bypass OPTIONS requests to origin** in the Access application’s Advanced CORS settings. The Worker supplies `https://coolcode.ca`, credentials, GET/POST/OPTIONS and Content-Type response permissions. Only unauthenticated OPTIONS preflight reaches the Worker; its preflight handler permits no API data. Requests still require a signed Access JWT. Log in by opening the adapter hostname in a top-level browser tab; then return to Plate Solve Lab. A same-site custom hostname helps avoid third-party-cookie restrictions.
 5. Set `web/config.json` `adapterUrl` to `https://platesolve-api.coolcode.ca`, commit, rebuild. The existing-job form now fetches through the adapter and the local-file upload panel appears. It accepts JPEG, PNG or FITS up to 10 MB, explicit submission consent, optional field-width bounds, and resumable bounded polling. If auth expires, reopen owner sign-in and retry.
 
 Deployment guidance follows [Cloudflare Access JWT validation](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/authorization-cookie/validating-json/) and [custom domain configuration](https://developers.cloudflare.com/workers/configuration/routing/custom-domains/). Logs and sampled traces are enabled, with no custom logging of image data, API keys or sessions.
@@ -51,6 +55,7 @@ The Worker independently validates RS256 signature, issuer, audience, expiry and
 ## Checks and publication
 
 ```
+python3 scripts/build_adapter.py
 node --test tests/*.test.mjs
 python3 -m unittest discover -s tests -v
 python3 scripts/build.py

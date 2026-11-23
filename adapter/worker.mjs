@@ -1,5 +1,6 @@
 /* Optional dedicated owner adapter. Deploy manually; never add this key to web/. */
 import {fromProvider,jobId,publicImageUrl} from '../web/model.mjs';
+import {OWNER_PAGE} from './owner-page.mjs';
 const BASE='https://nova.astrometry.net';let cachedKeys=null;
 async function boundedText(response,max=2000000){const reader=response.body?.getReader();if(!reader)return '';const chunks=[];let length=0;for(;;){const {done,value}=await reader.read();if(done)break;length+=value.byteLength;if(length>max){await reader.cancel();throw fail('Provider metadata exceeded the size limit.',502);}chunks.push(value);}return new Blob(chunks).text();}
 function fail(message,status=400){return Object.assign(new Error(message),{status});}
@@ -19,19 +20,19 @@ async function provider(path,payload,multipart){const options={signal:AbortSigna
 async function result(id){const [info,cal]=await Promise.all([provider(`/api/jobs/${id}/info/`),provider(`/api/jobs/${id}/calibration/`)]);return fromProvider(id,info,cal);}
 async function limitedForm(request){const max=11*1024*1024;if(Number(request.headers.get('content-length'))>max)throw fail('Maximum image size is 10 MB.',413);const reader=request.body?.getReader();if(!reader)throw fail('No upload body.');let size=0;const chunks=[];for(;;){const {done,value}=await reader.read();if(done)break;size+=value.byteLength;if(size>max){await reader.cancel();throw fail('Maximum image size is 10 MB.',413);}chunks.push(value);}return new Response(new Blob(chunks),{headers:{'Content-Type':request.headers.get('Content-Type')||''}}).formData();}
 export default {async fetch(request,env){
- const origin=request.headers.get('Origin'),allowed=env.ALLOWED_ORIGIN||'https://coolcode.ca';const headers={'Content-Type':'application/json','Cache-Control':'no-store','Vary':'Origin'};
- if(origin===allowed)Object.assign(headers,{'Access-Control-Allow-Origin':allowed,'Access-Control-Allow-Credentials':'true'});
+ const origin=request.headers.get('Origin'),allowed=env.ALLOWED_ORIGIN||'https://coolcode.ca',ownOrigin=new URL(request.url).origin;const originAllowed=origin===allowed||origin===ownOrigin;const headers={'Content-Type':'application/json','Cache-Control':'no-store','Vary':'Origin'};
+ if(originAllowed)Object.assign(headers,{'Access-Control-Allow-Origin':origin,'Access-Control-Allow-Credentials':'true'});
  const json=(data,status=200)=>new Response(JSON.stringify(data),{status,headers});
  try{
-  if(origin&&origin!==allowed)throw fail('Origin is not allowed.',403);
+  if(origin&&!originAllowed)throw fail('Origin is not allowed.',403);
   if(request.method==='OPTIONS'){headers['Access-Control-Allow-Methods']='GET, POST, OPTIONS';headers['Access-Control-Allow-Headers']='Content-Type';headers['Access-Control-Max-Age']='600';return new Response(null,{status:204,headers});}
   await authenticate(request,env);
   const path=new URL(request.url).pathname;let m;
-  if(request.method==='GET'&&path==='/')return json({status:'Owner authenticated. Return to Plate Solve Lab to inspect a job or submit a photo.'});
+  if(request.method==='GET'&&path==='/'){const nonce=crypto.randomUUID();return new Response(OWNER_PAGE.replaceAll('{{NONCE}}',nonce),{headers:{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','Content-Security-Policy':`default-src 'none'; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}'; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'`,'X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer'}});}
   if(request.method==='GET'&&(m=path.match(/^\/api\/job\/(\d{1,12})$/)))return json(await result(jobId(m[1])));
   if(request.method==='GET'&&(m=path.match(/^\/api\/submission\/(\d{1,12})$/))){const data=await provider(`/api/submissions/${jobId(m[1])}`);const jobs=(data.jobs||[]).filter(Boolean).slice(0,5);const infos=await Promise.all(jobs.map(id=>provider(`/api/jobs/${jobId(id)}/info/`)));const solved=infos.findIndex(x=>x.status==='success');if(solved>=0)return json({receipt:await result(jobId(jobs[solved]))});return json({pending:true,failed:jobs.length>0&&Boolean(data.processing_finished)&&infos.every(x=>x.status==='failure')});}
   if(request.method==='POST'&&path==='/api/solve'){
-   if(origin!==allowed)throw fail('Uploads must come from the configured application origin.',403);
+   if(!originAllowed)throw fail('Uploads must come from this owner portal or the configured application origin.',403);
    if(!env.ASTROMETRY_API_KEY)throw fail('Owner API key is not configured.',503);
    const form=await limitedForm(request);if(form.get('consent')!=='yes')throw fail('Submission permission is required.');const file=form.get('file'),url=String(form.get('url')||'');if(Boolean(file)===Boolean(url))throw fail('Choose one file or one image URL.');
    const options={publicly_visible:'n',allow_commercial_use:'n',allow_modifications:'n',downsample_factor:2};const lo=form.get('scale_lower'),hi=form.get('scale_upper');if(lo||hi){if(!(Number(lo)>0&&Number(hi)>Number(lo)&&Number(hi)<=180))throw fail('Invalid field width bounds.');Object.assign(options,{scale_units:'degwidth',scale_type:'ul',scale_lower:Number(lo),scale_upper:Number(hi)});}
